@@ -3,7 +3,7 @@ import tensorflow as tf
 
 
 QUANTIZED_TYPE = tf.int8 # tf.int8, tf.uint8, tf.float16
-QUANTIZED_TECHNIQUE = "symmetric"  # symmetric or asymmetric
+QUANTIZED_TECHNIQUE = "asymmetric"  # symmetric or asymmetric
 
 
 def positional_encoding(length, depth):
@@ -43,7 +43,7 @@ class PositionalEmbedding(tf.keras.layers.Layer):
 
 
 class Custom_Quantization_MultiHeadAttention(tf.keras.layers.Layer):
-    def __init__(self, num_heads, key_dim, quantized_type=QUANTIZED_TYPE, quantized_technique=QUANTIZED_TYPE, dropout=None, **kwargs):
+    def __init__(self, num_heads, key_dim, quantized_type=QUANTIZED_TYPE, quantized_technique=QUANTIZED_TECHNIQUE, dropout=None, **kwargs):
         super(Custom_Quantization_MultiHeadAttention, self).__init__(**kwargs)
         self.num_heads = num_heads
         self.key_dim = key_dim
@@ -286,7 +286,7 @@ class CustomDense(tf.keras.layers.Layer):
         
         # Linear transformation
         if hasattr(self, 'w'):
-            z = tf.matmul(inputs, self.w) + self.b  # Linear transformation
+            z = tf.matmul(inputs, self.w) + self.b  
         else:
             w_dequantized = tf.cast(self.w_quantized, tf.float32) - self.zero_point
             w_dequantized = tf.multiply(w_dequantized, self.quantized_scale)
@@ -486,7 +486,7 @@ class Transformer(tf.keras.Model):
                            vocab_size=target_vocab_size,
                            dropout_rate=dropout_rate)
 
-    self.final_layer = tf.keras.layers.Dense(target_vocab_size)
+    self.final_layer = CustomDense(target_vocab_size)
 
   def call(self, inputs):
     # To use a Keras model with `.fit` you must pass all your inputs in the first argument.

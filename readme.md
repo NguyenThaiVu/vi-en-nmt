@@ -3,7 +3,7 @@
 
 This project implements an English-to-Vietnamese translation model using the Transformer architecture, as described in the seminal paper **"Attention is All You Need"**. The model is trained on the **PhoMT** dataset, containing 3 million sentence pairs, and achieves a BLEU score of **0.26**.
 
-In addition, we utilize post-training quantization to reduce the model size, making it more suitable for deployment on limited devices.
+In addition, we utilize post-training quantization to reduce 20 MB the model size , making it more suitable for deployment on limited devices.
 
 ## Table of Contents
 
