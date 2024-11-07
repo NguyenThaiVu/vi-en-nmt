@@ -20,9 +20,9 @@ from sklearn.model_selection import train_test_split
 from tensorflow_text.tools.wordpiece_vocab import bert_vocab_from_dataset
 import tensorflow_text as tf_text
 
-from read_file_utils import *
-from model_utils import *
-from visualize_util import *
+from utils.read_file_utils import *
+from utils.model_utils import *
+from utils.visualize_util import *
 
 import streamlit as st
 
