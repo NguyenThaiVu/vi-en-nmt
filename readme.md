@@ -109,7 +109,7 @@ You can also use the trained model for translating sentences by running the note
 - Set a threshold to classify high-confidence predictions.
 - A reasonable threshold is defined as **half of the maximum entropy**, calculated as:
 
-  $\text{Threshold} = \frac{\log(\text{vocab\_size})}{2}$
+  $\text{Threshold} = \frac{\log(\text{vocab-size})}{2}$
 
 - Interpret the Confidence Scores:
   - If the entropy of the predicted word’s is below the threshold, the model is considered confident in its prediction. 
