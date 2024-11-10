@@ -3,3 +3,6 @@ data/raw_data
 
 translator
 test.ipynb
+
+deployment/translator
+deployment/tokeninzer_en_vi_converter

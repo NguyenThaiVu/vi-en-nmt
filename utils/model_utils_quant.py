@@ -1,5 +1,6 @@
 import numpy as np
 import tensorflow as tf
+from .quantization_utils import *
 
 
 QUANTIZED_TYPE = tf.int8 # tf.int8, tf.uint8, tf.float16
@@ -43,13 +44,12 @@ class PositionalEmbedding(tf.keras.layers.Layer):
 
 
 class Custom_Quantization_MultiHeadAttention(tf.keras.layers.Layer):
-    def __init__(self, num_heads, key_dim, quantized_type=QUANTIZED_TYPE, quantized_technique=QUANTIZED_TECHNIQUE, dropout=None, **kwargs):
+    def __init__(self, num_heads, key_dim, quantized_type=QUANTIZED_TYPE, dropout=None, **kwargs):
         super(Custom_Quantization_MultiHeadAttention, self).__init__(**kwargs)
         self.num_heads = num_heads
         self.key_dim = key_dim
         
         self.quantized_type = quantized_type
-        self.quantized_technique = quantized_technique  # symmetric or asymmetric
         self.dropout = dropout
 
 
@@ -82,82 +82,29 @@ class Custom_Quantization_MultiHeadAttention(tf.keras.layers.Layer):
         super(Custom_Quantization_MultiHeadAttention, self).build(input_shape)  # Be sure to call this at the end
 
 
-    def get_symmetric_quantize_matrix(self, x, target_dtype):
-        # Define the range for target type
-        qmin = tf.constant(target_dtype.min, dtype=tf.float32)
-        qmax = tf.constant(target_dtype.max, dtype=tf.float32)
-
-        # Compute the scale factor
-        max_abs_val = tf.reduce_max(tf.abs(x))
-        scale = max_abs_val / qmax
-        zero_point = 0.0
-
-        # Quantization and Clip to ensure quantized values are within the range
-        quantized = tf.round(x / scale)  # Perform quantization
-        quantized = tf.clip_by_value(quantized, qmin, qmax) 
-        
-        return tf.cast(quantized, target_dtype), scale, zero_point
-
-
-    def get_asymmetric_quantize_matrix(self, x, target_dtype):
-        # Define the range for the target type
-        qmin = tf.constant(target_dtype.min, dtype=tf.float32)
-        qmax = tf.constant(target_dtype.max, dtype=tf.float32)
-        
-        # Compute the min and max for the actual tensor
-        x_min = tf.reduce_min(x)
-        x_max = tf.reduce_max(x)
-
-        # Scale and zero point calculations
-        scale = (x_max - x_min) / (qmax - qmin)
-        zero_point = tf.cast(qmin - x_min / scale, tf.float32)
-
-        # Quantization and Clip to ensure quantized values are within the range
-        quantized = tf.round((x - x_min) / scale + qmin)
-        quantized = tf.clip_by_value(quantized, qmin, qmax)
-
-        return tf.cast(quantized, target_dtype), scale, zero_point
-
-
     def post_training_quantization(self):
         """Perform post training quantization after FINISH training"""
 
         # Query matrix
-        if self.quantized_technique == 'symmetric':
-            wq_quantized, quantized_scale_q, zero_point = self.get_symmetric_quantize_matrix(self.wq, target_dtype=self.quantized_type)
-        elif self.quantized_technique == 'asymmetric':
-            wq_quantized, quantized_scale_q, zero_point = self.get_asymmetric_quantize_matrix(self.wq, target_dtype=self.quantized_type)
-
+        wq_quantized, quantized_scale_q, zero_point = get_asymmetric_quantize_matrix(self.wq, target_dtype=self.quantized_type)
         self.wq_quantized.assign(wq_quantized)
         self.quantized_scale_q.assign(quantized_scale_q)
         self.zero_point_q.assign(zero_point)
 
         # Key matrix
-        if self.quantized_technique == 'symmetric':
-            wk_quantized, quantized_scale_k, zero_point = self.get_symmetric_quantize_matrix(self.wk, target_dtype=self.quantized_type)
-        elif self.quantized_technique == 'asymmetric':
-            wk_quantized, quantized_scale_k, zero_point = self.get_asymmetric_quantize_matrix(self.wk, target_dtype=self.quantized_type)
-    
+        wk_quantized, quantized_scale_k, zero_point = get_asymmetric_quantize_matrix(self.wk, target_dtype=self.quantized_type)
         self.wk_quantized.assign(wk_quantized)
         self.quantized_scale_k.assign(quantized_scale_k)
         self.zero_point_k.assign(zero_point)
 
         # Value matrix
-        if self.quantized_technique == 'symmetric':
-            wv_quantized, quantized_scale_v, zero_point = self.get_symmetric_quantize_matrix(self.wv, target_dtype=self.quantized_type)
-        elif self.quantized_technique == 'asymmetric':
-            wv_quantized, quantized_scale_v, zero_point = self.get_asymmetric_quantize_matrix(self.wv, target_dtype=self.quantized_type)
-
+        wv_quantized, quantized_scale_v, zero_point = get_asymmetric_quantize_matrix(self.wv, target_dtype=self.quantized_type)
         self.wv_quantized.assign(wv_quantized)
         self.quantized_scale_v.assign(quantized_scale_v)
         self.zero_point_v.assign(zero_point)
 
         # W_o matrix
-        if self.quantized_technique == 'symmetric':
-            wo_quantized, quantized_scale_o, zero_point = self.get_symmetric_quantize_matrix(self.wo, target_dtype=self.quantized_type)
-        elif self.quantized_technique == 'asymmetric':
-            wo_quantized, quantized_scale_o, zero_point = self.get_asymmetric_quantize_matrix(self.wo, target_dtype=self.quantized_type)
-
+        wo_quantized, quantized_scale_o, zero_point = get_asymmetric_quantize_matrix(self.wo, target_dtype=self.quantized_type)
         self.wo_quantized.assign(wo_quantized)
         self.quantized_scale_o.assign(quantized_scale_o)
         self.zero_point_o.assign(zero_point)
@@ -210,91 +157,51 @@ class Custom_Quantization_MultiHeadAttention(tf.keras.layers.Layer):
         return output
 
 
-class CustomDense(tf.keras.layers.Layer):
-    def __init__(self, units, activation=None, quantized_type=tf.int8, quantized_technique='asymmetric'):
-        super(CustomDense, self).__init__()
-        self.units = units
-        self.activation = tf.keras.activations.get(activation)
-        self.quantized_type = quantized_type
-        self.quantized_technique = quantized_technique  # symmetric or asymmetric
-
-    def get_symmetric_quantize_matrix(self, x, target_dtype):
-        # Define the range for target type
-        qmin = tf.constant(target_dtype.min, dtype=tf.float32)
-        qmax = tf.constant(target_dtype.max, dtype=tf.float32)
-
-        # Compute the scale factor
-        max_abs_val = tf.reduce_max(tf.abs(x))
-        scale = max_abs_val / qmax
-        zero_point = 0.0
-
-        # Quantization and Clip to ensure quantized values are within the range
-        quantized = tf.round(x / scale)  # Perform quantization
-        quantized = tf.clip_by_value(quantized, qmin, qmax) 
-        
-        return tf.cast(quantized, target_dtype), scale, zero_point
+# class CustomDense(tf.keras.layers.Layer):
+#     def __init__(self, units, activation=None, quantized_type=tf.int8):
+#         super(CustomDense, self).__init__()
+#         self.units = units
+#         self.activation = tf.keras.activations.get(activation)
+#         self.quantized_type = quantized_type
 
 
-    def get_asymmetric_quantize_matrix(self, x, target_dtype):
-        # Define the range for the target type
-        qmin = tf.constant(target_dtype.min, dtype=tf.float32)
-        qmax = tf.constant(target_dtype.max, dtype=tf.float32)
-        
-        # Compute the min and max for the actual tensor
-        x_min = tf.reduce_min(x)
-        x_max = tf.reduce_max(x)
+#     def build(self, input_shape):
+#         # Initialize weights and bias
+#         self.w = self.add_weight(shape=(input_shape[-1], self.units), initializer='random_normal', trainable=True)
+#         self.b = self.add_weight(shape=(self.units,), initializer='random_normal', trainable=True)
 
-        # Scale and zero point calculations
-        scale = (x_max - x_min) / (qmax - qmin)
-        zero_point = tf.cast(qmin - x_min / scale, tf.float32)
+#         self.w_quantized = self.add_weight(shape=(input_shape[-1], self.units), dtype=self.quantized_type, initializer='zeros', trainable=False)
+#         self.quantized_scale = self.add_weight(shape=(), initializer='ones', trainable=False)
+#         self.zero_point = self.add_weight(shape=(), initializer='ones', trainable=False)
 
-        # Quantization and Clip to ensure quantized values are within the range
-        quantized = tf.round((x - x_min) / scale + qmin)
-        quantized = tf.clip_by_value(quantized, qmin, qmax)
-
-        return tf.cast(quantized, target_dtype), scale, zero_point
+#         super(CustomDense, self).build(input_shape)  # Be sure to call this at the end
 
 
-    def build(self, input_shape):
-        # Initialize weights and bias
-        self.w = self.add_weight(shape=(input_shape[-1], self.units), initializer='random_normal', trainable=True)
-        self.b = self.add_weight(shape=(self.units,), initializer='random_normal', trainable=True)
+#     def post_training_quantization(self):
+#         """
+#         Function to quantize the weights. This function MUST be called after FINISH training.
+#         """
 
-        self.w_quantized = self.add_weight(shape=(input_shape[-1], self.units), dtype=self.quantized_type, initializer='zeros', trainable=False)
-        self.quantized_scale = self.add_weight(shape=(), initializer='ones', trainable=False)
-        self.zero_point = self.add_weight(shape=(), initializer='ones', trainable=False)
+#         w_quantized, quantized_scale, zero_point = get_asymmetric_quantize_matrix(self.w, target_dtype=self.quantized_type)
 
-        super(CustomDense, self).build(input_shape)  # Be sure to call this at the end
+#         self.w_quantized.assign(w_quantized)
+#         self.quantized_scale.assign(quantized_scale)
+#         self.zero_point.assign(zero_point)
 
+#         del self.w
 
-    def post_training_quantization(self):
-        """Perform post training quantization after FINISH training"""
+#     def call(self, inputs):
+#         if hasattr(self, 'w'):  # Linear transformation
+#             z = tf.matmul(inputs, self.w) + self.b  
+#         else:
+#             # De-quantize the weights
+#             w_dequantized = tf.cast(self.w_quantized, tf.float32) - self.zero_point
+#             w_dequantized = tf.multiply(w_dequantized, self.quantized_scale)
+#             z = tf.matmul(inputs, w_dequantized) + self.b
 
-        # Query matrix
-        if self.quantized_technique == 'symmetric':
-            w_quantized, quantized_scale, zero_point = self.get_symmetric_quantize_matrix(self.w, target_dtype=self.quantized_type)
-        elif self.quantized_technique == 'asymmetric':
-            w_quantized, quantized_scale, zero_point = self.get_asymmetric_quantize_matrix(self.w, target_dtype=self.quantized_type)
-
-        self.w_quantized.assign(w_quantized)
-        self.quantized_scale.assign(quantized_scale)
-        self.zero_point.assign(zero_point)
-
-        del self.w
-
-    def call(self, inputs):
-        
-        # Linear transformation
-        if hasattr(self, 'w'):
-            z = tf.matmul(inputs, self.w) + self.b  
-        else:
-            w_dequantized = tf.cast(self.w_quantized, tf.float32) - self.zero_point
-            w_dequantized = tf.multiply(w_dequantized, self.quantized_scale)
-            z = tf.matmul(inputs, w_dequantized) + self.b
-
-        if self.activation:
-            z = self.activation(z)  
-        return z  
+#         if self.activation:
+#             z = self.activation(z)  
+#         return z  
 
 
 
@@ -354,8 +261,10 @@ class FeedForward(tf.keras.layers.Layer):
   def __init__(self, d_model, dff, dropout_rate=0.1):
     super().__init__()
     self.seq = tf.keras.Sequential([
-      CustomDense(dff, activation='relu'),
-      CustomDense(d_model),
+      # CustomDense(dff, activation='relu'),
+      # CustomDense(d_model),
+      tf.keras.layers.Dense(dff, activation='relu'),
+      tf.keras.layers.Dense(d_model),
       tf.keras.layers.Dropout(dropout_rate)
     ])
     self.add = tf.keras.layers.Add()
@@ -486,7 +395,8 @@ class Transformer(tf.keras.Model):
                            vocab_size=target_vocab_size,
                            dropout_rate=dropout_rate)
 
-    self.final_layer = CustomDense(target_vocab_size)
+    self.final_layer = tf.keras.layers.Dense(target_vocab_size)
+    # self.final_layer = CustomDense(target_vocab_size)
 
   def call(self, inputs):
     # To use a Keras model with `.fit` you must pass all your inputs in the first argument.
